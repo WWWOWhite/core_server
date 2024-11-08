@@ -19,8 +19,6 @@ from django.urls import include
 
 urlpatterns = [
     path('usermanage/', include('usermanage.urls')),
-    path('softwaremanage/', include('softwaremanage.urls')),
     path('nodemanage/', include('nodemanage.urls')),
-    path('entitymanage/', include('entitymanage.urls')),
     path('admin/', admin.site.urls),
 ]

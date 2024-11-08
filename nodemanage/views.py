@@ -1,5 +1,7 @@
+import socket
+
 from django.http import JsonResponse
-from .models import NodeTable
+from .models import NodeTable, GuidTable
 from .models import LogTable
 
 import datetime, json
@@ -8,53 +10,72 @@ from django.utils import timezone
 import requests
 from datetime import datetime
 
-
-
 # Create your views here.
 def node_update(request):
     if request.method == "POST":
         try:
-            # json_data = request.POST.get("update_data")
-            # json_data = json.loads(json_data)
             json_data = json.loads(request.body.decode("utf-8"))
-            node_id = json_data["node_id"]
-            update_instance = NodeTable.objects.get(node_id=node_id)
+            ip = json_data["node_ip"]
+            update_instance = NodeTable.objects.get(node_ip=ip)
             if not update_instance:
                 return JsonResponse({"status": "error", "message": "node not found"})
-            # node_ip = json_data["node_ip"]
-            # node_port = int(json_data["node_port"])
-            node_desc = json_data["node_desc"]
-            # update_instance.node_ip = node_ip
-            # update_instance.node_port = node_port
-            update_instance.node_desc = node_desc
-            update_instance.update_time = timezone.now()
-            update_instance.save()
+
+            sub_topic = ','.join(json_data["node_sub"])
+            pub_topic = ','.join(json_data["node_pub"])
+
+            # 查询之前的node_sub , 求出两者的差集
+            node_instance = NodeTable.objects.get(node_ip=ip)
+            data = node_instance.get_data2()
+            guid_array = data["node_local_white"].split(",")
+            sub_topics_array = data["node_sub"].split(",")
+            topic_deleted = []
+            now_topic_map = {}
+
+            for topic in json_data["node_sub"]:
+                now_topic_map[topic]=1
+
+            for topic in sub_topics_array:
+                if topic not in now_topic_map:
+                    topic_deleted.append(topic)
+
+            NodeTable.objects.filter(node_ip=ip).update(node_sub=sub_topic, node_pub=pub_topic,update_time=timezone.now())
+            print("guid_array : ",guid_array," , topic_deleted : ",topic_deleted)
+            # 更新完后再删除，减少并发问题
+            if len(topic_deleted) > 0 :
+                print("deleted topic array : ", topic_deleted)
+                guid_instance = GuidTable.objects.filter(topic__in=topic_deleted, guid__in=guid_array)
+                for instance in guid_instance:
+                    data = instance.get_data()
+                    print("up to delete guid data :",data["guid"])
+                    inner_del_white(ip, data["guid"])
+
             return JsonResponse({"status": "success"})
         except Exception as e:
             return JsonResponse({"status": "error", "message": str(e)})
 
-
 def node_add(request):
     if request.method == "POST":
         try:
-            # json_data = request.POST.get("add_data")
-            # json_data = json.loads(json_data)
             print('node_add')
 
             json_data = json.loads(request.body.decode("utf-8"))
             node_ip = json_data["node_ip"]
             node_port = int(json_data["node_port"])
             node_desc = json_data["node_desc"]
+            node_sub = json_data["node_sub"]
+            node_pub = json_data["node_pub"]
+            node_sub_str = ','.join(node_sub)
+            node_pub_str = ','.join(node_pub)
             print(node_ip,node_port,node_desc)
             node_instance = NodeTable()
             node_instance.node_ip = node_ip
             node_instance.node_port = node_port
             if node_port < 0 or node_port > 65535:
                 return JsonResponse({"status": "error", "message": "port out of range"})
+            node_instance.node_sub = node_sub_str
+            node_instance.node_pub = node_pub_str
             node_instance.node_desc = node_desc
-            # node_instance.node_id = calculate_str_hash(node_ip + node_port)
             node_instance.node_is_alive = True
-            # node_instance.create_time = time.time().__str__().__format__('YYYY-MM-DD HH:MM')
             node_instance.create_time = datetime.now().strftime('%Y-%m-%d %H:%M')
             node_instance.save()
             print('node_add save')
@@ -62,7 +83,6 @@ def node_add(request):
             return JsonResponse({"status": "success"})
         except Exception as e:
             return JsonResponse({"status": "error", "message": str(e)})
-
 
 def node_query_all(request):
     if request.method == "POST":
@@ -78,10 +98,7 @@ def node_query_all(request):
             else:
                 send_instance = query_instance[(page - 1) * limit : page * limit]
 
-            # TODO 保活机制放到定时任务中
 
-            for temp in send_instance:
-                print(temp.get_data())
             data = {
                 "num": send_instance.count(),
                 "data": [temp.get_data() for temp in send_instance],
@@ -90,14 +107,9 @@ def node_query_all(request):
         except Exception as e:
             return JsonResponse({"status": "error", "message": str(e)})
 
-
-
-
 def node_query_by_id(request):
     if request.method == "POST":
         try:
-            # json_data = request.POST.get("query_data")
-            # json_data = json.loads(json_data)
             json_data = json.loads(request.body.decode("utf-8"))
             node_id = json_data["node_id"]
             node_instance = NodeTable.objects.get(node_id=node_id)
@@ -108,16 +120,13 @@ def node_query_by_id(request):
         except Exception as e:
             return JsonResponse({"status": "error", "message": str(e)})
 
-
 # 同时还需撤销相关注册实体，后续补充
 def node_delete(request):
     if request.method == "POST":
         try:
-            # json_data = request.POST.get("delete_data")
-            # json_data = json.loads(json_data)
             json_data = json.loads(request.body.decode("utf-8"))
-            node_id = json_data["node_id"]
-            node_instance = NodeTable.objects.get(node_id=node_id)
+            node_ip = json_data["node_ip"]
+            node_instance = NodeTable.objects.get(node_ip=node_ip)
             if not node_instance:
                 return JsonResponse({"status": "error", "message": "node not exist"})
             """
@@ -128,12 +137,14 @@ def node_delete(request):
         except Exception as e:
             return JsonResponse({"status": "error", "message": str(e)})
 
-
 def node_delete_all():
     NodeTable.objects.all().delete()
 
 def log_delete_all():
     LogTable.objects.all().delete()
+
+def guid_delete_all():
+    GuidTable.objects.all().delete()
 
 def node_load_config(request):
     if request.method == "POST":
@@ -161,7 +172,7 @@ def node_load_config(request):
         except Exception as e:
             return JsonResponse({"status": "error", "message": str(e)})
 
-
+# 接收发布节点发送的guid和topic
 def receive_guid(request):
     if request.method == "POST":
         try:
@@ -169,7 +180,52 @@ def receive_guid(request):
             guid = data["guid"]
             topic = data["topic"]
             ip = data["ip"]
-            print(guid,topic)
+
+
+            # 查询数据库中载入的各个节点的访问控制信息,将topic作为key, ip_port作为value
+            map_topic_ip_port = {}
+            query_instance = NodeTable.objects.all()
+            for entity in query_instance:
+                data = entity.get_data2()
+                ip_port = data["node_ip"]+":"+str(data["node_port"])
+                topics_array = data["node_sub"].split(",")
+                for topic_in in topics_array:
+                    if topic == topic_in:
+                        if topic not in map_topic_ip_port:
+                            map_topic_ip_port[topic] = []
+                        map_topic_ip_port[topic].append(ip_port)
+            # 检索符合订阅条件的节点
+            for node in map_topic_ip_port[topic]:
+                # 将guid更新到数据库中
+                ip_suit = node.split(':')[0]
+                node_instance = NodeTable.objects.filter(node_ip=ip_suit).first()
+                node_guid = node_instance.white_guid
+                # 如果节点在线，下发配置
+                if node_instance.node_is_alive > 0:
+                    config_delivery(node, guid,topic)
+                if len(node_guid) == 0:
+                    print(f"white_guid 为空，保存新的 guid: {guid}")
+                    node_instance.white_guid = guid
+                    node_instance.save()
+                else:
+                    guid_list = node_guid.split(",")
+                    if guid in guid_list:
+                        print(f"guid {guid} 已存在，未修改")
+                    else:
+                        new_guid_list = node_guid + ',' + guid
+                        print(f"guid {guid} 不存在，更新后的 white_guid: {new_guid_list}")
+                        node_instance.white_guid = new_guid_list
+                        node_instance.save()
+
+            # 记录guid
+            try:
+                new_guid = GuidTable.objects.create(
+                    ip = ip,
+                    topic = topic,
+                    guid = guid
+                )
+            except Exception as e :
+                print("the record has existed")
 
             # 记录日志
             new_log = LogTable.objects.create(
@@ -178,92 +234,55 @@ def receive_guid(request):
                 log_desc='发布主题: '+topic + '; guid为: '+ guid,  # 日志描述
             )
 
-            # 查询数据库中所有的node , 将topic作为key, ip_port作为value
-            #   更优方案, 存储在redis中
-            map_topic_ip_port = {}
-            query_instance = NodeTable.objects.all()
-            for entity in query_instance:
-                data = entity.get_data()
-                ip_port = data["node_ip"]+":"+str(data["node_port"])
-                topics_array = data["node_sub"].split(",")
-                for topic_in in topics_array:
-                    if topic == topic_in:
-                        if topic not in map_topic_ip_port:
-                            map_topic_ip_port[topic] = []
-                        map_topic_ip_port[topic].append(ip_port)
-
-
-            # 检索符合订阅条件的节点
-            for node in map_topic_ip_port[topic]:
-                print(node)
-                # 发送配置下发请求
-                config_delivery(node,guid)
-                # 将guid更新到数据库中
-                # 查询数据库对应
-                ip = node.split(':')[0]
-                node_instance = NodeTable.objects.filter(node_ip=ip).first()
-                node_guid = node_instance.white_guid
-                print(node_guid)
-
-                if len(node_guid) == 0:
-                    # 假设需要对 white_guid 进行某种处理
-                    # processed_guid = process_guid(node_guid)  # 替换为实际处理逻辑
-                    # print('1')
-                    print(f"white_guid 为空，保存新的 guid: {guid}")
-                    node_instance.white_guid = guid
-                    node_instance.save()
-                else:
-                    guid_list = node_guid.split(",")  # 将 white_guid 按逗号分割成列表
-                    if guid in guid_list:
-                        # 如果 guid 已经存在，不做任何操作
-                        print(f"guid {guid} 已存在，未修改")
-                    else:
-                        # 如果 guid 不存在，则追加 guid 并保存
-                        new_guid_list = node_guid + ',' + guid
-                        print(f"guid {guid} 不存在，更新后的 white_guid: {new_guid_list}")
-                        node_instance.white_guid = new_guid_list
-                        node_instance.save()
-
             return JsonResponse({"status": "success"})
 
         except Exception as e:
             print(e)
             return JsonResponse({"status": "error", "message": str(e)})
 
-def process_guid(guid):
-    return guid
 
-def config_delivery(ip_port,guid):
+# 配置下发
+def config_delivery(ip_port,guid,topic):
     url = 'http://'+ip_port+'/add_guid'
     data = {
-        "guid" : guid
+        "guid" : guid,
+        "topic":topic
     }
     ip = ip_port.split(':')[0]
     response = requests.post(url,json=data)
     json_response = response.json()
+    # 白名单下发成功
     if json_response.get("code") == 200 :
-        # 成功
-        # 载入数据库
         print("log load",ip)
-
         # 记录日志
-        new_log = LogTable.objects.create(
-            node_ip=ip,
-            log_type='info',  # 日志类型
-            log_desc=json_response.get("msg")  # 日志描述
-        )
-        print(json_response.get("msg"))
-        return
+        if len(topic) > 0 :
+            new_log = LogTable.objects.create(
+                node_ip=ip,
+                log_type='info',  # 日志类型
+                log_desc= 'Guid From Topic: \n'+topic+json_response.get("msg")  # 日志描述
+            )
+            print('Guid From Topic: \n'+topic+json_response.get("msg"))
+
+        else:
+            new_log = LogTable.objects.create(
+                node_ip=ip,
+                log_type='info',  # 日志类型
+                log_desc= 'Delete From Core Server \n'+json_response.get("msg")  # 日志描述
+            )
+            print('Delete From Core Server \n'+json_response.get("msg"))
+
+        return 1,json_response.get("msg")
+    # 白名单下发失败
     else:
        #  失败
        new_log = LogTable.objects.create(
-           log_node_id=ip,
+           node_ip=ip,
            log_type='err',  # 日志类型
            log_desc=json_response.get("msg")  # 日志描述
        )
        # 记录日志
-       return
-
+       print(json_response.get("msg"))
+       return 0,json_response.get("msg")
 
 def log_query_all(request):
     if request.method == "POST":
@@ -282,8 +301,6 @@ def log_query_all(request):
             else:
                 send_instance = query_instance[(page - 1) * limit : page * limit]
 
-            for temp in send_instance:
-                print(temp.get_data())
             data = {
                 "num": length,
                 "data": [temp.get_data() for temp in send_instance],
@@ -291,3 +308,138 @@ def log_query_all(request):
             return JsonResponse({"status": "success", "message": data})
         except Exception as e:
             return JsonResponse({"status": "error", "message": str(e)})
+
+def add_white(request):
+    if request.method == "POST":
+        try:
+            json_data = json.loads(request.body.decode("utf-8"))
+            print('add white',json_data)
+
+            ip = json_data["node_ip"]
+            guid = json_data["guid"]
+            status,msg = config_delivery(ip+':8890',guid,'')
+            if status > 0 :
+                return JsonResponse({"status": "success","message":msg})
+            else:
+                return JsonResponse({"err": "error","message":msg})
+        except Exception as e:
+            return JsonResponse({"status": "error", "message": str(e)})
+
+def del_white(request):
+    if request.method == "POST":
+        try:
+            json_data = json.loads(request.body.decode("utf-8"))
+            ip = json_data["node_ip"]
+            guid = json_data["guid"]
+            data = {
+                "guid":guid,
+                "ip" : ip
+            }
+
+            url = 'http://' + ip +':8890' + '/delete_guid'
+            response = requests.post(url, json=data)
+            json_response = response.json()
+            if json_response.get("code") == 200:
+                # 成功
+                # 载入数据库
+                print("delete guid log load", ip)
+                print(json_response.get("msg"))
+                # 记录日志
+                new_log = LogTable.objects.create(
+                    node_ip=ip,
+                    log_type='info',  # 日志类型
+                    log_desc=json_response.get("msg")  # 日志描述
+                )
+
+                return JsonResponse({"status": "success"})
+
+            else:
+                #  失败
+                new_log = LogTable.objects.create(
+                    node_ip=ip,
+                    log_type='err',  # 日志类型
+                    log_desc=json_response.get("msg")  # 日志描述
+                )
+                # 记录日志
+                return JsonResponse({"status": "err", "message":json_response.get("msg") })
+        except Exception as e:
+            return JsonResponse({"status": "error", "message": str(e)})
+
+def inner_del_white(ip, guid):
+    data = {
+        "guid": guid,
+        "ip": ip
+    }
+    url = 'http://' + ip + ':8890' + '/delete_guid'
+    print("inner del white:", ip, guid)
+    try:
+        response = requests.post(url, json=data, timeout=0.5)
+        json_response = response.json()
+        if json_response.get("code") == 200:
+            # 成功
+            # 载入数据库
+            print("update  guid log load", ip)
+            # 记录日志
+            new_log = LogTable.objects.create(
+                node_ip=ip,
+                log_type='info',  # 日志类型
+                log_desc='With draw guid : ' + guid  # 日志描述
+            )
+    except Exception as e:
+        print("Err : after update withdraw guid failed", e)
+
+
+
+
+def pub_message_delivery(pub_ip,topic_name):
+    # 查询所有的ip地址
+    node_instances = GuidTable.objects.filter(node_is_alive=1)
+    # 对所有ip地址载入字符串加载
+    for node in node_instances:
+        data = node.get_data()
+        ip = data['node_ip']
+        ip_chars = ''.join(ip)
+        ip_and_topic = ip_chars + topic_name
+        status, msg = config_delivery(ip + ':8890', ip_and_topic, '')
+
+        if status > 0:
+            #  记录日志
+            print(f'节点{ip} 成功载入发布端访问控制策略')
+            new_log = LogTable.objects.create(
+                node_ip=ip,
+                log_type='info',  # 日志类型
+                log_desc='成功载入新增发布端控制策略，允许发布端节点 ['+ pub_ip + '] 发布topic ['+ topic_name+']。',  # 日志描述
+            )
+
+        else:
+            # 记录日志
+            print(f'节点{ip} 失败载入发布端访问控制策略')
+            new_log = LogTable.objects.create(
+                node_ip=ip,
+                log_type='err',  # 日志类型
+                log_desc='失败载入新增发布端控制策略，发布端节点 ['+ pub_ip + '] 发布topic ['+ topic_name+']。',  # 日志描述
+            )
+
+def add_config(ip,str,topic):
+    url = 'http://' + ip+':8890' + '/add_guid'
+    data = {
+        "guid": str,
+        "topic": topic
+    }
+    response = requests.post(url, json=data)
+    json_response = response.json()
+
+    if json_response.get("code") == 200:
+        return 1, json_response.get("msg")
+    else:
+        return 0, json_response.get("msg")
+
+
+def ip_to_char(ip_str):
+    # 将IP地址解析为四个字节
+    ip_bytes = socket.inet_aton(ip_str)
+
+    # 将每个字节转换为字符
+    ip_chars = ''.join(chr(byte) for byte in ip_bytes)
+
+    return ip_chars

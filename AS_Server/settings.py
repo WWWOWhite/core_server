@@ -39,8 +39,6 @@ INSTALLED_APPS = [
     "django.contrib.staticfiles",
     "usermanage.apps.UsermanageConfig",
     "nodemanage.apps.NodemanageConfig",
-    "softwaremanage.apps.SoftwaremanageConfig",
-    "entitymanage.apps.EntitymanageConfig",
     "corsheaders",
     "commonutils",
 ]

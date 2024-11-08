@@ -182,7 +182,7 @@ def user_info(request):
                 payload = {
                     "roles": [user_role],
                     "introduction": "I am a super administrator",
-                    "avatar": "https://upload.shejihz.com/2019/03/fe2ec2e7ed7f6795b46b793d93c99b7e.jpg",
+                    "avatar": "./icons/user.png",
                     "name": "管理员",
                     # "csrf_token": csrf_token,
                 }
@@ -190,7 +190,7 @@ def user_info(request):
                 payload = {
                     "roles": [user_role],
                     "introduction": "I am an editor",
-                    "avatar": "https://upload.shejihz.com/2019/03/fe2ec2e7ed7f6795b46b793d93c99b7e.jpg",
+                    "avatar": "./icons/user.png",
                     "name": "软件开发人员",
                     # "csrf_token": csrf_token,
                 }
