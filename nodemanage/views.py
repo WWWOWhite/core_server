@@ -157,6 +157,7 @@ def node_load_config(request):
             #   清空日志信息
             log_delete_all()
 
+            guid_delete_all()
             # 将data解析成列表， 将sub和pub的内容用 ，来拼接
             for node in json_content['access_control_list']:
                 NodeTable.objects.create(
@@ -390,32 +391,46 @@ def inner_del_white(ip, guid):
 
 
 
+def test_add_pub(request):
+    print('test_add_pub function is running')
+    if request.method == "POST":
+        try:
+            data = json.loads(request.body)
+            ip = data["ip"]
+            topic = data["topic"]
+
+            pub_message_delivery(ip,topic)
+            return JsonResponse({"status": "success"})
+
+        except Exception as e:
+            print(e)
+            return JsonResponse({"status": "error", "message": str(e)})
 
 def pub_message_delivery(pub_ip,topic_name):
+    print('pub_message_delivery')
     # 查询所有的ip地址
-    node_instances = GuidTable.objects.filter(node_is_alive=1)
+    node_instances = NodeTable.objects.filter(node_is_alive=1)
     # 对所有ip地址载入字符串加载
     for node in node_instances:
         data = node.get_data()
-        ip = data['node_ip']
-        ip_chars = ''.join(ip)
-        ip_and_topic = ip_chars + topic_name
-        status, msg = config_delivery(ip + ':8890', ip_and_topic, '')
-
+        ip_log = data['node_ip']
+        ip_and_topic = ip_topic_to_16str(pub_ip,topic_name)
+        status, msg = add_config(ip_log, ip_and_topic, '')
         if status > 0:
-            #  记录日志
-            print(f'节点{ip} 成功载入发布端访问控制策略')
+            print(f'节点{ip_log} 成功载入发布端访问控制策略,允许发布端节点 [{pub_ip}] 发布topic [{topic_name}]')
+            print(msg)
             new_log = LogTable.objects.create(
-                node_ip=ip,
+                node_ip=ip_log,
                 log_type='info',  # 日志类型
                 log_desc='成功载入新增发布端控制策略，允许发布端节点 ['+ pub_ip + '] 发布topic ['+ topic_name+']。',  # 日志描述
             )
 
         else:
-            # 记录日志
-            print(f'节点{ip} 失败载入发布端访问控制策略')
+
+            print(f'节点{ip_log} 失败载入发布端访问控制策略')
+            print(msg)
             new_log = LogTable.objects.create(
-                node_ip=ip,
+                node_ip=ip_log,
                 log_type='err',  # 日志类型
                 log_desc='失败载入新增发布端控制策略，发布端节点 ['+ pub_ip + '] 发布topic ['+ topic_name+']。',  # 日志描述
             )
@@ -435,11 +450,15 @@ def add_config(ip,str,topic):
         return 0, json_response.get("msg")
 
 
-def ip_to_char(ip_str):
-    # 将IP地址解析为四个字节
-    ip_bytes = socket.inet_aton(ip_str)
+def ip_topic_to_16str(ip_str, topic):
+    # 将 IP 地址拆分为四个数字，并转换为两位十六进制字符
+    ip_hex_chars = ''.join(format(int(part), '02x') for part in ip_str.split('.'))
 
-    # 将每个字节转换为字符
-    ip_chars = ''.join(chr(byte) for byte in ip_bytes)
+    # 将 topic 中的每个字符转换为两位十六进制字符
+    topic_hex_chars = ''.join(format(ord(char), '02x') for char in topic)
 
-    return ip_chars
+    # 拼接 IP 地址的十六进制和 topic 的十六进制
+    result = ip_hex_chars + topic_hex_chars
+    return result
+
+

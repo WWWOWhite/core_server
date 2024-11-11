@@ -20,4 +20,7 @@ urlpatterns = [
     path("add-white/", views.add_white, name="add-white"),
     # 人为删除白名单接口
     path("del-white/", views.del_white, name="del-white"),
+
+    # 测试pub控制策略接口
+    path("test-add-pub/",views.test_add_pub,name="test-add-pub")
 ]
