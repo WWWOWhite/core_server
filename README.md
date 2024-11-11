@@ -1,6 +1,8 @@
 # 中心服务器后端代码 
 ## 环境
 - Python 3.10  (3.9也ok)
+- MySQL 
+  - 创建数据库 django_db , 并导入django_db.sql建表文件
 ## 配置修改
 进入AS_Server目录下，修改settings.py文件 , 修改和数据库相关的配置。
 
