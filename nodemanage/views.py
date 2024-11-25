@@ -57,7 +57,6 @@ def node_add(request):
     if request.method == "POST":
         try:
             print('node_add')
-
             json_data = json.loads(request.body.decode("utf-8"))
             node_ip = json_data["node_ip"]
             node_port = int(json_data["node_port"])
@@ -67,17 +66,16 @@ def node_add(request):
             node_sub_str = ','.join(node_sub)
             node_pub_str = ','.join(node_pub)
             print(node_ip,node_port,node_desc)
-            node_instance = NodeTable()
-            node_instance.node_ip = node_ip
-            node_instance.node_port = node_port
-            if node_port < 0 or node_port > 65535:
-                return JsonResponse({"status": "error", "message": "port out of range"})
-            node_instance.node_sub = node_sub_str
-            node_instance.node_pub = node_pub_str
-            node_instance.node_desc = node_desc
-            node_instance.node_is_alive = True
-            node_instance.create_time = datetime.now().strftime('%Y-%m-%d %H:%M')
-            node_instance.save()
+            NodeTable.objects.create(
+                node_id=node_ip,  # Assuming 'ip' is used as the node_id
+                node_ip=node_ip,
+                node_port=node_port,
+                node_sub=node_sub_str,  # Concatenate topics with commas
+                node_pub=node_pub_str,
+                node_desc=f"Node {node_ip} - Port {node_port}",  # Example description
+                node_is_config=False,  # Set this based on your needs
+                create_time = datetime.now().strftime('%Y-%m-%d %H:%M')
+            )
             print('node_add save')
 
             return JsonResponse({"status": "success"})
@@ -389,7 +387,41 @@ def inner_del_white(ip, guid):
     except Exception as e:
         print("Err : after update withdraw guid failed", e)
 
+def del_all_white(request):
+    if request.method == "POST":
+        try:
+            json_data = json.loads(request.body.decode("utf-8"))
+            ip = json_data["node_ip"]
+            node_instances = NodeTable.objects.filter(node_ip=ip)
+            # 对所有ip地址载入字符串加载
+            for node in node_instances:
+                data = node.get_data2()
+                node_local_white = data['node_local_white']
+                guid_list = node_local_white.split(",")
+                for guid in guid_list:
+                    data = {
+                        "guid": guid,
+                        "ip": ip
+                    }
+                    url = 'http://' + ip + ':8890' + '/delete_guid'
+                    response = requests.post(url, json=data)
+                    json_response = response.json()
+                    if json_response.get("code") == 200:
+                        # 成功
+                        # 载入数据库
+                        print("delete guid log load", ip)
+                        print(json_response.get("msg"))
+                        # 记录日志
+                        new_log = LogTable.objects.create(
+                            node_ip=ip,
+                            log_type='info',  # 日志类型
+                            log_desc=json_response.get("msg")  # 日志描述
+                        )
 
+            return JsonResponse({"status": "success"})
+
+        except Exception as e:
+            return JsonResponse({"status": "error", "message": str(e)})
 
 def test_add_pub(request):
     print('test_add_pub function is running')
